@@ -39,7 +39,66 @@
 <!-- The path a submission takes, from arriving to the label a reader sees.
      Six or seven steps — this is the trace you wrote in Milestone 1. -->
 
+Provenance Guard is a local provenance-checking web service that evaluates submitted text using two independent signals—a causal language model perplexity signal and a surface stylometry signal—combines them into a single confidence score, maps that score to a human-readable provenance label, logs every decision to an append-only JSONL audit trail, and provides an appeal endpoint for writers to contest false positives.
 
+### End-to-End Submission Path (7 Steps)
+
+1. **HTTP Arrival & Input Validation (`app.py::submit`, `POST /submit`):** A client sends a JSON payload (`{"text": "...", "creator_id": "..."}`). The route parses the JSON, validates that `text` is a non-empty string within length bounds (logging a rejection via `audit.log_rejection` and returning `400 Bad Request` if missing, too short, or oversized), normalizes `creator_id` (defaulting to `"anonymous"` if omitted), and mints a unique `content_id` (`uuid4`).
+2. **Signal One — Model Predictability (`detector.py::model_signal`):** The validated text passes through the local `gpt2` causal language model (`perplexity(text)`), which computes the exponential of mean token-level cross-entropy loss (up to `DETECTOR_MAX_TOKENS = 400` tokens) and squashes it via a logistic curve (`midpoint = 45.0`, `steepness = 1.6`) into `model_score` in `[0.0, 1.0]`, adding a measure of how predictable the word sequence is (`1.0` = highly predictable / AI-like).
+3. **Signal Two — Surface Stylometry (`stylometry.py::style_signal`):** In parallel, the raw text passes through `stylometry.py`, which tokenizes sentences and words without reading semantics to compute `sentence_length_spread`, `type_token_ratio`, and `punctuation_density`, combining and scaling them into `style_score` in `[0.0, 1.0]` (`1.0` = uniform sentence cadence, repetitive vocabulary, and flat punctuation typical of unedited AI output).
+4. **Signal Combination (`scoring.py::combine_signals`):** Both `model_score` and `style_score` are passed to `combine_signals(model_score, style_score)`, which merges them into a single `combined_score` (`confidence`) in `[0.0, 1.0]` according to our weighting rule.
+5. **Threshold & Human-Readable Label Mapping (`scoring.py::score_to_label`):** `score_to_label(combined_score)` compares the combined score against `config.HUMAN_THRESHOLD` and `config.AI_THRESHOLD`, adding both a short machine-readable `guess` (`"human"`, `"unsure"`, or `"ai"`) and the exact plain-English `label` string that a reader or writer sees.
+6. **Append-Only Audit Logging (`audit.py::log_decision`):** Before responding, the service writes a permanent, timestamped JSON line to `logs/audit.jsonl` containing all nine required audit fields (`timestamp`, `content_id`, `creator_id`, `guess`, `model_score`, `style_score`, `combined_score`, `label`, and `status = "decided"`).
+7. **JSON Response & Appeal Lifecycle (`app.py::submit` → `POST /appeal`):** The route returns HTTP `200 OK` with `content_id`, `guess`, `confidence`, `label`, `model_score`, and `style_score`. If the writer disagrees with the label, they submit `content_id` and `reasoning` to `POST /appeal` (`app.py::appeal`), which verifies `content_id` via `audit.entries_for(content_id)` and appends an `"under_review"` appeal record via `audit.log_appeal`.
+
+### Tracing the False Positive
+
+- **Who submits and why it happens:** A real human writer—for example, a second-language English speaker or a technical writer who deliberately writes in short, direct sentences using familiar, high-frequency words—submits their own original paragraph to `POST /submit`.
+- **What scores they get:** Because their vocabulary is simple and their sentence transitions follow standard grammatical patterns, `gpt2` is rarely surprised (`perplexity ≈ 22`), producing a high `model_score` (e.g., `0.76`). Because their sentences are uniformly short (`12–15` words) with only periods and commas, `style_score` also lands high (e.g., `0.68`), yielding a combined `confidence` score of `0.72`—above `AI_THRESHOLD` (`0.65`).
+- **What the label says to them:** Their response comes back with `"guess": "ai"` and a `label` stating: *"This text shows strong patterns typical of AI-generated writing. If you wrote this yourself, you can submit an appeal using your content ID."*
+- **What they can do about it:** Using the `content_id` returned in their `POST /submit` response, the writer sends a `POST /appeal` request with `{"content_id": "<their-content-id>", "reasoning": "I wrote this myself in plain English; I can provide my draft history."}`. The service verifies that `content_id` exists in `logs/audit.jsonl`, appends a new log entry with `"event": "appeal"` and `"status": "under_review"` alongside the original decision, and returns confirmation that their work has been placed `under_review` rather than leaving an unchallengeable accusation on record.
+
+### Endpoint Contracts
+
+#### 1. `POST /submit`
+- **Request (`application/json`):**
+  | Field | Type | Required | Description |
+  |---|---|---|---|
+  | `text` | `string` | Yes | The text submission to evaluate (must contain at least 3 tokens / a few sentences and not exceed maximum character limits). |
+  | `creator_id` | `string` | No (defaults to `"anonymous"`) | Identifier for the submitting writer or account. |
+
+- **Success Response (`200 OK`, `application/json`):**
+  | Field | Type | Description |
+  |---|---|---|
+  | `content_id` | `string` | Unique identifier (`uuid4` hex/string) generated for this submission, used to look up or appeal the decision. |
+  | `guess` | `string` | Machine-readable classification: `"human"`, `"unsure"`, or `"ai"`. |
+  | `confidence` | `float` | Combined score in `[0.0, 1.0]` output by `scoring.combine_signals` (`0.0` = human, `1.0` = AI). |
+  | `label` | `string` | Plain-English sentence shown to the reader/writer (from `scoring.score_to_label`). |
+  | `model_score` | `float` | Signal 1 score in `[0.0, 1.0]` from `detector.model_signal`. |
+  | `style_score` | `float` | Signal 2 score in `[0.0, 1.0]` from `stylometry.style_signal`. |
+  | `status` | `string` | Initial lifecycle state: `"decided"`. |
+
+- **Error Response (`400 Bad Request` / `429 Too Many Requests`, `application/json`):**
+  Returns `{"error": "<reason_code>", "message": "<human-readable explanation>"}` and records a `"rejected"` entry in `logs/audit.jsonl`.
+
+#### 2. `POST /appeal`
+- **Request (`application/json`):**
+  | Field | Type | Required | Description |
+  |---|---|---|---|
+  | `content_id` | `string` | Yes | The `content_id` returned by an earlier `POST /submit` call. |
+  | `reasoning` | `string` | Yes | The writer's explanation contesting the classification. |
+
+- **Success Response (`200 OK`, `application/json`):**
+  | Field | Type | Description |
+  |---|---|---|
+  | `content_id` | `string` | The appealed submission's `content_id`. |
+  | `creator_id` | `string` | The `creator_id` associated with the original submission. |
+  | `status` | `string` | Updated lifecycle status: `"under_review"`. |
+  | `reasoning` | `string` | Echo of the writer's submitted appeal reasoning. |
+  | `message` | `string` | Confirmation message to the writer that their appeal has been logged. |
+
+- **Error Response (`400 Bad Request` / `404 Not Found`, `application/json`):**
+  Returns `400` if `content_id` or `reasoning` is missing/blank, or `404` (`{"error": "not_found", "message": "..."}`) if `audit.entries_for(content_id)` finds no matching submission.
 
 ---
 
@@ -54,18 +113,27 @@
 ### Signal one — the model signal
 
 **What it measures:**
+Token-level **perplexity** (next-token predictability) under a local causal language model (`gpt2` in `detector.py::model_signal`), transformed via a logistic curve (`midpoint = 45.0`, `steepness = 1.6`) into a `0.0–1.0` score where higher values indicate lower perplexity (more predictable text).
 
 **Why that might differ between human and AI writing:**
+Autoregressive language models generate text by sampling high-probability next tokens at every step, so unedited AI prose tends to follow smooth, high-likelihood word transitions that `gpt2` predicts with low surprise (low perplexity → high `model_score`). Human writers make idiosyncratic word choices, abrupt topic jumps, and specific concrete references that surprise a general language model (high perplexity → low `model_score`).
 
 **What it can't see:**
+Predictability is not authorship: `model_signal` cannot distinguish between machine generation and **a real human writing plainly in common words and short, straightforward sentences** (such as an L2/non-native English speaker, a young student, or a concise technical writer), whom it falsely flags as AI. Conversely, it is easily fooled in the opposite direction by AI text prompted to use rare, ornate vocabulary or injected with deliberate typos/unusual tokens, which spike `gpt2` perplexity and make AI text look human.
 
 ### Signal two — the style signal
 
 **What it measures:**
+Surface **structural and lexical regularity** of the text (`stylometry.py::style_signal`), combining three non-semantic measures:
+1. `sentence_length_spread`: coefficient of variation (standard deviation divided by mean) of sentence word counts.
+2. `type_token_ratio`: ratio of unique lowercase words to total words (lexical diversity).
+3. `punctuation_density`: frequency and variety of expressive punctuation (commas, semicolons, dashes, parentheses, exclamation/question marks) relative to word count.
 
 **Why that might differ between human and AI writing:**
+Default LLM outputs tend to march in uniform, medium-length sentences (`15–22` words) with low sentence-length variance, reuse safe transition words, and rely almost exclusively on standard periods and commas. Human prose is naturally bursty and lumpy—mixing a three-word fragment next to a forty-word clause (`high sentence_length_spread`), using more varied vocabulary in short passages, and employing idiosyncratic punctuation (dashes, parentheticals, semicolons, exclamation marks).
 
 **What it can't see:**
+`style_signal` **cannot read a single word for meaning or grammar**. Any cheap surface perturbation that alters character or sentence shapes without changing the underlying AI-generated content—such as splitting one sentence with a period to create a 2-word fragment, sprinkling random typos (which inflate unique word counts in `type_token_ratio`), or inserting dummy semicolons/dashes—fools `style_signal` into scoring AI text as human. Conversely, a human writing a structured list or a single-sentence submission has near-zero sentence-length spread and can be misread as machine-like.
 
 ### The combining rule
 
