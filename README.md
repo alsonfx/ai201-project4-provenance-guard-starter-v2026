@@ -192,11 +192,19 @@ Default LLM outputs tend to march in uniform, medium-length sentences (`15–22`
 ```bash
 $ curl -X POST http://127.0.0.1:5000/submit \
   -H "Content-Type: application/json" \
-  -d '{"text": "...", "creator_id": "..."}'
+  -d '{"text": "The implementation of the proposed framework requires careful consideration of several key factors. First, it is important to note that the system must be able to handle a wide variety of different inputs. Additionally, the overall performance of the solution depends on a number of important variables.", "creator_id": "test_ai"}'
 ```
 
 ```json
-
+{
+  "confidence": 0.8864,
+  "content_id": "6b50c443-6f5c-4ce9-b5b1-ba532bd8d1be",
+  "guess": "ai",
+  "label": "PLACEHOLDER — Milestone 3 single-signal check.",
+  "model_score": 0.8864,
+  "status": "decided",
+  "style_score": null
+}
 ```
 
 **An appeal**
@@ -204,7 +212,7 @@ $ curl -X POST http://127.0.0.1:5000/submit \
 ```bash
 $ curl -X POST http://127.0.0.1:5000/appeal \
   -H "Content-Type: application/json" \
-  -d '{"content_id": "...", "reasoning": "..."}'
+  -d '{"content_id": "6b50c443-6f5c-4ce9-b5b1-ba532bd8d1be", "reasoning": "..."}'
 ```
 
 ```json
@@ -218,7 +226,44 @@ $ curl "http://127.0.0.1:5000/log?limit=3"
 ```
 
 ```json
-
+{
+  "count": 3,
+  "entries": [
+    {
+      "combined_score": 0.8864,
+      "content_id": "6b50c443-6f5c-4ce9-b5b1-ba532bd8d1be",
+      "creator_id": "test_ai",
+      "guess": "ai",
+      "label": "PLACEHOLDER — Milestone 3 single-signal check.",
+      "model_score": 0.8864,
+      "status": "decided",
+      "style_score": null,
+      "timestamp": "2026-10-28T23:36:12+00:00"
+    },
+    {
+      "combined_score": 0.0223,
+      "content_id": "e9f20c8e-ce5d-4b02-a1ee-3a532ca45d01",
+      "creator_id": "albert",
+      "guess": "human",
+      "label": "PLACEHOLDER — Milestone 3 single-signal check.",
+      "model_score": 0.0223,
+      "status": "decided",
+      "style_score": null,
+      "timestamp": "2026-10-28T23:36:12+00:00"
+    },
+    {
+      "combined_score": 0.2394,
+      "content_id": "fce4f76b-53f0-4068-ad41-d674ed452790",
+      "creator_id": "writer_plain",
+      "guess": "human",
+      "label": "PLACEHOLDER — Milestone 3 single-signal check.",
+      "model_score": 0.2394,
+      "status": "decided",
+      "style_score": null,
+      "timestamp": "2026-10-28T23:36:12+00:00"
+    }
+  ]
+}
 ```
 
 ---

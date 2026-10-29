@@ -199,17 +199,77 @@ def submit():
     what should this do when `text` is missing, empty, or enormous? A crash on
     a malformed input is one of the most common real failures there is.
     """
-    payload = request.get_json(silent=True) or {}
+    import detector
 
-    # TODO: delete this and build the route.
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        audit.log_rejection(creator_id="unknown", reason="invalid_json")
+        return jsonify({
+            "error": "invalid_input",
+            "message": "Request body must be a JSON object.",
+        }), 400
+
+    raw_creator = payload.get("creator_id")
+    creator_id = (
+        raw_creator.strip()
+        if isinstance(raw_creator, str) and raw_creator.strip()
+        else "anonymous"
+    )
+
+    raw_text = payload.get("text")
+    if not isinstance(raw_text, str) or not raw_text.strip():
+        audit.log_rejection(creator_id=creator_id, reason="missing_or_empty_text")
+        return jsonify({
+            "error": "invalid_input",
+            "message": "Field 'text' is required and must be a non-empty string.",
+        }), 400
+
+    clean_text = raw_text.strip()
+    if len(clean_text) > 20000:
+        audit.log_rejection(
+            creator_id=creator_id,
+            reason="text_too_long",
+            text_length=len(clean_text),
+        )
+        return jsonify({
+            "error": "invalid_input",
+            "message": "Field 'text' exceeds maximum length of 20,000 characters.",
+        }), 400
+
+    try:
+        m_score = detector.model_signal(clean_text)
+    except ValueError as exc:
+        audit.log_rejection(creator_id=creator_id, reason="text_too_short")
+        return jsonify({
+            "error": "invalid_input",
+            "message": str(exc),
+        }), 400
+
+    content_id = str(uuid.uuid4())
+    guess = "ai" if m_score >= config.AI_THRESHOLD else ("human" if m_score <= config.HUMAN_THRESHOLD else "unsure")
+    confidence = m_score
+    label = "PLACEHOLDER — Milestone 3 single-signal check."
+
+    audit.log_decision(
+        content_id=content_id,
+        creator_id=creator_id,
+        guess=guess,
+        model_score=m_score,
+        style_score=None,
+        combined_score=confidence,
+        label=label,
+        status="decided",
+    )
+
     return jsonify({
-        "error": "not_implemented",
-        "message": "POST /submit isn't built yet — see the TODO in app.py.",
-        "you_sent": {
-            "text_length": len(payload.get("text", "")),
-            "creator_id": payload.get("creator_id"),
-        },
-    }), 501
+        "content_id": content_id,
+        "guess": guess,
+        "confidence": confidence,
+        "label": label,
+        "model_score": m_score,
+        "style_score": None,
+        "status": "decided",
+    })
 
 
 @app.post("/appeal")
