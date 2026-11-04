@@ -141,8 +141,18 @@ Default LLM outputs tend to march in uniform, medium-length sentences (`15–22`
      signals disagree? -->
 
 **The rule:**
+Our combining rule takes an equally-weighted combination (50/50) of the semantic predictability score (`model_score`) and surface structural burstiness (`style_score`). When both signals corroborate each other (e.g. low perplexity and low structural burstiness), the combined score reaches decisive confidence. When the two signals disagree (e.g. one signal reads human while the other reads machine), their average falls into the intermediate "unsure" decision band (0.35 to 0.65). By requiring consensus between both independent signals before making a high-confidence AI accusation, this rule directly limits false-positive accusations against human writers whose texts trigger only one signal (e.g., uniform formatting or familiar, predictable wording).
 
 **The numbers:**
+- `WEIGHT_MODEL_SIGNAL = 0.5` (defined in `config.py`)
+- `WEIGHT_STYLE_SIGNAL = 0.5` (defined in `config.py`)
+- `HUMAN_THRESHOLD = 0.35` (defined in `config.py`)
+- `AI_THRESHOLD = 0.65` (defined in `config.py`)
+- Combining formula: `combined_score = round(0.5 * model_score + 0.5 * style_score, 4)`
+- Decision boundaries:
+  - `combined_score <= 0.35` -> `"human"`
+  - `0.35 < combined_score < 0.65` -> `"unsure"`
+  - `combined_score >= 0.65` -> `"ai"`
 
 **Where it lives:** `scoring.py::combine_signals`
 
@@ -150,6 +160,13 @@ Default LLM outputs tend to march in uniform, medium-length sentences (`15–22`
      somewhere else, say where. -->
 
 **A case where my two signals split, and what my rule does with it:**
+- **Input Text:**
+  > *"Hi team, please find attached the meeting notes from yesterday's sync. We reviewed the quarterly roadmap and finalized our delivery schedule. The design review is postponed until next Tuesday due to conference travel. Let me know if you have any feedback before tomorrow afternoon."*
+- **Signal Breakdown:**
+  - `model_score = 0.3839` (Perplexity 58.2 under GPT-2; domain terms like "sync", "roadmap", and "postponed" cause enough token-level surprise to keep the score close to human).
+  - `style_score = 0.7808` (Sentence lengths are uniform at 11, 10, 11, and 10 words, with no semicolons, em dashes, or expressive punctuation marks, which `style_signal` views as AI-like).
+- **How the combining rule handles it:**
+  `combine_signals(0.3839, 0.7808)` outputs `0.5824`. Because `0.5824` sits inside the `(0.35, 0.65)` range, the service returns `"guess": "unsure"`. Rather than convicting the writer based on flat formatting alone, the rule recognises that disagreement signifies uncertainty, protecting the writer from a false positive.
 
 
 
@@ -197,13 +214,13 @@ $ curl -X POST http://127.0.0.1:5000/submit \
 
 ```json
 {
-  "confidence": 0.8864,
-  "content_id": "6b50c443-6f5c-4ce9-b5b1-ba532bd8d1be",
+  "confidence": 0.857,
+  "content_id": "084737ae-7047-44d2-8924-425fd12a9be0",
   "guess": "ai",
   "label": "PLACEHOLDER — Milestone 3 single-signal check.",
   "model_score": 0.8864,
   "status": "decided",
-  "style_score": null
+  "style_score": 0.8277
 }
 ```
 
@@ -230,37 +247,37 @@ $ curl "http://127.0.0.1:5000/log?limit=3"
   "count": 3,
   "entries": [
     {
-      "combined_score": 0.8864,
-      "content_id": "6b50c443-6f5c-4ce9-b5b1-ba532bd8d1be",
+      "combined_score": 0.1658,
+      "content_id": "1c94cd3a-a872-406a-8a41-8307adc7d4ed",
+      "creator_id": "formal_human",
+      "guess": "human",
+      "label": "PLACEHOLDER — Milestone 3 single-signal check.",
+      "model_score": 0.3278,
+      "status": "decided",
+      "style_score": 0.0039,
+      "timestamp": "2026-11-04T23:31:54+00:00"
+    },
+    {
+      "combined_score": 0.6869,
+      "content_id": "375d44ef-5702-4a96-98b0-9bdcbf0898c0",
+      "creator_id": "lightly_edited_ai",
+      "guess": "ai",
+      "label": "PLACEHOLDER — Milestone 3 single-signal check.",
+      "model_score": 0.6456,
+      "status": "decided",
+      "style_score": 0.7282,
+      "timestamp": "2026-11-04T23:31:54+00:00"
+    },
+    {
+      "combined_score": 0.857,
+      "content_id": "084737ae-7047-44d2-8924-425fd12a9be0",
       "creator_id": "test_ai",
       "guess": "ai",
       "label": "PLACEHOLDER — Milestone 3 single-signal check.",
       "model_score": 0.8864,
       "status": "decided",
-      "style_score": null,
-      "timestamp": "2026-10-28T23:36:12+00:00"
-    },
-    {
-      "combined_score": 0.0223,
-      "content_id": "e9f20c8e-ce5d-4b02-a1ee-3a532ca45d01",
-      "creator_id": "albert",
-      "guess": "human",
-      "label": "PLACEHOLDER — Milestone 3 single-signal check.",
-      "model_score": 0.0223,
-      "status": "decided",
-      "style_score": null,
-      "timestamp": "2026-10-28T23:36:12+00:00"
-    },
-    {
-      "combined_score": 0.2394,
-      "content_id": "fce4f76b-53f0-4068-ad41-d674ed452790",
-      "creator_id": "writer_plain",
-      "guess": "human",
-      "label": "PLACEHOLDER — Milestone 3 single-signal check.",
-      "model_score": 0.2394,
-      "status": "decided",
-      "style_score": null,
-      "timestamp": "2026-10-28T23:36:12+00:00"
+      "style_score": 0.8277,
+      "timestamp": "2026-11-04T23:33:06+00:00"
     }
   ]
 }

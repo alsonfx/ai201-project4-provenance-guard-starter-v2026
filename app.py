@@ -137,6 +137,8 @@ def ping():
 def health():
     """Is the service up, and has the model been downloaded yet?"""
     import detector
+    import scoring
+    import stylometry
 
     loaded = detector._model is not None
     return jsonify({
@@ -200,6 +202,8 @@ def submit():
     a malformed input is one of the most common real failures there is.
     """
     import detector
+    import scoring
+    import stylometry
 
     payload = request.get_json(silent=True)
     if not isinstance(payload, dict):
@@ -245,9 +249,11 @@ def submit():
             "message": str(exc),
         }), 400
 
+    s_score = stylometry.style_signal(clean_text)
+    confidence = scoring.combine_signals(m_score, s_score)
+
     content_id = str(uuid.uuid4())
-    guess = "ai" if m_score >= config.AI_THRESHOLD else ("human" if m_score <= config.HUMAN_THRESHOLD else "unsure")
-    confidence = m_score
+    guess = "ai" if confidence >= config.AI_THRESHOLD else ("human" if confidence <= config.HUMAN_THRESHOLD else "unsure")
     label = "PLACEHOLDER — Milestone 3 single-signal check."
 
     audit.log_decision(
@@ -255,7 +261,7 @@ def submit():
         creator_id=creator_id,
         guess=guess,
         model_score=m_score,
-        style_score=None,
+        style_score=s_score,
         combined_score=confidence,
         label=label,
         status="decided",
@@ -267,7 +273,7 @@ def submit():
         "confidence": confidence,
         "label": label,
         "model_score": m_score,
-        "style_score": None,
+        "style_score": s_score,
         "status": "decided",
     })
 
