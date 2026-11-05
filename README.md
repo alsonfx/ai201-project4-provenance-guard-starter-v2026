@@ -61,42 +61,40 @@ Provenance Guard is a local provenance-checking web service that evaluates submi
 ### Endpoint Contracts
 
 #### 1. `POST /submit`
+
 - **Request (`application/json`):**
-  | Field | Type | Required | Description |
-  |---|---|---|---|
-  | `text` | `string` | Yes | The text submission to evaluate (must contain at least 3 tokens / a few sentences and not exceed maximum character limits). |
-  | `creator_id` | `string` | No (defaults to `"anonymous"`) | Identifier for the submitting writer or account. |
-
+  | Field          | Type       | Required                         | Description                                                                                                                 |
+  | -------------- | ---------- | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+  | `text`       | `string` | Yes                              | The text submission to evaluate (must contain at least 3 tokens / a few sentences and not exceed maximum character limits). |
+  | `creator_id` | `string` | No (defaults to `"anonymous"`) | Identifier for the submitting writer or account.                                                                            |
 - **Success Response (`200 OK`, `application/json`):**
-  | Field | Type | Description |
-  |---|---|---|
-  | `content_id` | `string` | Unique identifier (`uuid4` hex/string) generated for this submission, used to look up or appeal the decision. |
-  | `guess` | `string` | Machine-readable classification: `"human"`, `"unsure"`, or `"ai"`. |
-  | `confidence` | `float` | Combined score in `[0.0, 1.0]` output by `scoring.combine_signals` (`0.0` = human, `1.0` = AI). |
-  | `label` | `string` | Plain-English sentence shown to the reader/writer (from `scoring.score_to_label`). |
-  | `model_score` | `float` | Signal 1 score in `[0.0, 1.0]` from `detector.model_signal`. |
-  | `style_score` | `float` | Signal 2 score in `[0.0, 1.0]` from `stylometry.style_signal`. |
-  | `status` | `string` | Initial lifecycle state: `"decided"`. |
-
+  | Field           | Type       | Description                                                                                                     |
+  | --------------- | ---------- | --------------------------------------------------------------------------------------------------------------- |
+  | `content_id`  | `string` | Unique identifier (`uuid4` hex/string) generated for this submission, used to look up or appeal the decision. |
+  | `guess`       | `string` | Machine-readable classification: `"human"`, `"unsure"`, or `"ai"`.                                        |
+  | `confidence`  | `float`  | Combined score in `[0.0, 1.0]` output by `scoring.combine_signals` (`0.0` = human, `1.0` = AI).         |
+  | `label`       | `string` | Plain-English sentence shown to the reader/writer (from `scoring.score_to_label`).                            |
+  | `model_score` | `float`  | Signal 1 score in `[0.0, 1.0]` from `detector.model_signal`.                                                |
+  | `style_score` | `float`  | Signal 2 score in `[0.0, 1.0]` from `stylometry.style_signal`.                                              |
+  | `status`      | `string` | Initial lifecycle state: `"decided"`.                                                                         |
 - **Error Response (`400 Bad Request` / `429 Too Many Requests`, `application/json`):**
   Returns `{"error": "<reason_code>", "message": "<human-readable explanation>"}` and records a `"rejected"` entry in `logs/audit.jsonl`.
 
 #### 2. `POST /appeal`
+
 - **Request (`application/json`):**
-  | Field | Type | Required | Description |
-  |---|---|---|---|
-  | `content_id` | `string` | Yes | The `content_id` returned by an earlier `POST /submit` call. |
-  | `reasoning` | `string` | Yes | The writer's explanation contesting the classification. |
-
+  | Field          | Type       | Required | Description                                                      |
+  | -------------- | ---------- | -------- | ---------------------------------------------------------------- |
+  | `content_id` | `string` | Yes      | The `content_id` returned by an earlier `POST /submit` call. |
+  | `reasoning`  | `string` | Yes      | The writer's explanation contesting the classification.          |
 - **Success Response (`200 OK`, `application/json`):**
-  | Field | Type | Description |
-  |---|---|---|
-  | `content_id` | `string` | The appealed submission's `content_id`. |
-  | `creator_id` | `string` | The `creator_id` associated with the original submission. |
-  | `status` | `string` | Updated lifecycle status: `"under_review"`. |
-  | `reasoning` | `string` | Echo of the writer's submitted appeal reasoning. |
-  | `message` | `string` | Confirmation message to the writer that their appeal has been logged. |
-
+  | Field          | Type       | Description                                                           |
+  | -------------- | ---------- | --------------------------------------------------------------------- |
+  | `content_id` | `string` | The appealed submission's `content_id`.                             |
+  | `creator_id` | `string` | The `creator_id` associated with the original submission.           |
+  | `status`     | `string` | Updated lifecycle status: `"under_review"`.                         |
+  | `reasoning`  | `string` | Echo of the writer's submitted appeal reasoning.                      |
+  | `message`    | `string` | Confirmation message to the writer that their appeal has been logged. |
 - **Error Response (`400 Bad Request` / `404 Not Found`, `application/json`):**
   Returns `400` if `content_id` or `reasoning` is missing/blank, or `404` (`{"error": "not_found", "message": "..."}`) if `audit.entries_for(content_id)` finds no matching submission.
 
@@ -125,6 +123,7 @@ Predictability is not authorship: `model_signal` cannot distinguish between mach
 
 **What it measures:**
 Surface **structural and lexical regularity** of the text (`stylometry.py::style_signal`), combining three non-semantic measures:
+
 1. `sentence_length_spread`: coefficient of variation (standard deviation divided by mean) of sentence word counts.
 2. `type_token_ratio`: ratio of unique lowercase words to total words (lexical diversity).
 3. `punctuation_density`: frequency and variety of expressive punctuation (commas, semicolons, dashes, parentheses, exclamation/question marks) relative to word count.
@@ -168,8 +167,6 @@ Our combining rule takes an equally-weighted combination (50/50) of the semantic
 - **How the combining rule handles it:**
   `combine_signals(0.3839, 0.7808)` outputs `0.5824`. Because `0.5824` sits inside the `(0.35, 0.65)` range, the service returns `"guess": "unsure"`. Rather than convicting the writer based on flat formatting alone, the rule recognises that disagreement signifies uncertainty, protecting the writer from a false positive.
 
-
-
 ---
 
 ## Label Variants
@@ -179,18 +176,14 @@ Our combining rule takes an equally-weighted combination (50/50) of the semantic
 
      Write them for someone who has never heard the word "threshold". -->
 
-| Label | Score range | The exact text a reader sees |
-|---|---|---|
-| high-confidence human |  |  |
-| unsure |  |  |
-| high-confidence AI |  |  |
+| Label                 | Score range | The exact text a reader sees |
+| --------------------- | ----------- | ---------------------------- |
+| high-confidence human | 0.00 – 0.35 | We're confident this text was written by a person, showing the natural variety and pacing of human expression. |
+| unsure                | 0.35 – 0.65 | We can't tell whether this was written by a person or generated by an AI. The writing shows a mix of patterns, so we are not making an automated call. |
+| high-confidence AI    | 0.65 – 1.00 | This text shows strong patterns typical of AI-generated writing. If you wrote this yourself, you can submit an appeal using your content ID. |
 
 **Why I worded the "unsure" one this way:**
-<!-- It's the hardest of the three. It has to admit uncertainty without
-     sounding like an accusation, because the person reading it may well have
-     written every word themselves. -->
-
-
+The "unsure" label is intentionally framed around the service's own observational boundaries ("We can't tell", "we are not making an automated call") rather than making an accusatory or suspicious claim about the author ("questionable text", "unverified origin"). Real human writing varies tremendously—from concise emails to structured technical documentation—and frequently exhibits uniform cadence or simple vocabulary that triggers intermediate scores. By transparently acknowledging that the text exhibits mixed characteristics and refusing to guess or assign a punitive classification, the label protects writers from unjustified suspicion while remaining honest about the limits of multi-signal heuristics.
 
 ---
 
@@ -215,9 +208,9 @@ $ curl -X POST http://127.0.0.1:5000/submit \
 ```json
 {
   "confidence": 0.857,
-  "content_id": "084737ae-7047-44d2-8924-425fd12a9be0",
+  "content_id": "8544a988-9007-40c2-8a0d-75a9caa52827",
   "guess": "ai",
-  "label": "PLACEHOLDER — Milestone 3 single-signal check.",
+  "label": "This text shows strong patterns typical of AI-generated writing. If you wrote this yourself, you can submit an appeal using your content ID.",
   "model_score": 0.8864,
   "status": "decided",
   "style_score": 0.8277
@@ -229,11 +222,17 @@ $ curl -X POST http://127.0.0.1:5000/submit \
 ```bash
 $ curl -X POST http://127.0.0.1:5000/appeal \
   -H "Content-Type: application/json" \
-  -d '{"content_id": "6b50c443-6f5c-4ce9-b5b1-ba532bd8d1be", "reasoning": "..."}'
+  -d '{"content_id": "8544a988-9007-40c2-8a0d-75a9caa52827", "reasoning": "I wrote this paragraph myself for an academic report on systems architecture. Please review."}'
 ```
 
 ```json
-
+{
+  "content_id": "8544a988-9007-40c2-8a0d-75a9caa52827",
+  "creator_id": "test_ai",
+  "message": "Your appeal has been received and this submission is now under review.",
+  "reasoning": "I wrote this paragraph myself for an academic report on systems architecture. Please review.",
+  "status": "under_review"
+}
 ```
 
 **What the log shows afterwards**
@@ -247,37 +246,31 @@ $ curl "http://127.0.0.1:5000/log?limit=3"
   "count": 3,
   "entries": [
     {
-      "combined_score": 0.1658,
-      "content_id": "1c94cd3a-a872-406a-8a41-8307adc7d4ed",
-      "creator_id": "formal_human",
-      "guess": "human",
-      "label": "PLACEHOLDER — Milestone 3 single-signal check.",
-      "model_score": 0.3278,
-      "status": "decided",
-      "style_score": 0.0039,
-      "timestamp": "2026-11-04T23:31:54+00:00"
-    },
-    {
-      "combined_score": 0.6869,
-      "content_id": "375d44ef-5702-4a96-98b0-9bdcbf0898c0",
-      "creator_id": "lightly_edited_ai",
-      "guess": "ai",
-      "label": "PLACEHOLDER — Milestone 3 single-signal check.",
-      "model_score": 0.6456,
-      "status": "decided",
-      "style_score": 0.7282,
-      "timestamp": "2026-11-04T23:31:54+00:00"
+      "content_id": "6317b6e1-f847-4c85-83cd-90ffa9600f33",
+      "creator_id": "ai_test",
+      "event": "appeal",
+      "reasoning": "I wrote this paragraph myself for an academic report on systems architecture. Please review.",
+      "status": "under_review",
+      "timestamp": "2026-11-04T23:45:56+00:00"
     },
     {
       "combined_score": 0.857,
-      "content_id": "084737ae-7047-44d2-8924-425fd12a9be0",
+      "content_id": "8544a988-9007-40c2-8a0d-75a9caa52827",
       "creator_id": "test_ai",
       "guess": "ai",
-      "label": "PLACEHOLDER — Milestone 3 single-signal check.",
+      "label": "This text shows strong patterns typical of AI-generated writing. If you wrote this yourself, you can submit an appeal using your content ID.",
       "model_score": 0.8864,
       "status": "decided",
       "style_score": 0.8277,
-      "timestamp": "2026-11-04T23:33:06+00:00"
+      "timestamp": "2026-11-04T23:46:46+00:00"
+    },
+    {
+      "content_id": "8544a988-9007-40c2-8a0d-75a9caa52827",
+      "creator_id": "test_ai",
+      "event": "appeal",
+      "reasoning": "I wrote this paragraph myself for an academic report on systems architecture. Please review.",
+      "status": "under_review",
+      "timestamp": "2026-11-04T23:46:46+00:00"
     }
   ]
 }
@@ -308,21 +301,19 @@ $ curl "http://127.0.0.1:5000/log?limit=3"
 **My limits:** ___ per minute, ___ per day
 
 **Why those numbers and not others:**
+
 <!-- Think about two people: a real writer submitting their own work a few
      times an hour, and a script sending a thousand variations to map your
      thresholds. Your numbers have to be liveable for the first and hostile to
      the second. -->
 
-**What a caller counts as:** <!-- per address, or per creator_id? They fail
-differently — one script can look like a thousand callers, and one household
-can look like one. -->
+**What a caller counts as:** 
 
 **The run of status codes when I pushed past it:**
 
 <!-- python run_attacks.py --flood 15 -->
 
 ```
-
 ```
 
 ---
@@ -332,20 +323,15 @@ can look like one. -->
 <!-- Every attack with its outcome and a held-or-broke mark.
      `run_attacks.py --label before` produces the table. -->
 
-
-
 **Ten audit log entries from the run**
 
 <!-- Choose entries that show the interesting failures, not the ten easiest. -->
 
 ```json
-
 ```
 
 **The single worst outcome** — the one I'd least want to explain to a writer
 whose work got caught by it:
-
-
 
 ---
 
@@ -354,12 +340,12 @@ whose work got caught by it:
 <!-- Your five criteria across three trials. `run_eval.py --label before`. -->
 
 | Criterion | Target | Run 1 | Run 2 | Run 3 | Verdict |
-|---|---|---|---|---|---|
-| 1.  |  |  |  |  |  |
-| 2.  |  |  |  |  |  |
-| 3.  |  |  |  |  |  |
-| 4.  |  |  |  |  |  |
-| 5.  |  |  |  |  |  |
+| --------- | ------ | ----- | ----- | ----- | ------- |
+| 1.        |        |       |       |       |         |
+| 2.        |        |       |       |       |         |
+| 3.        |        |       |       |       |         |
+| 4.        |        |       |       |       |         |
+| 5.        |        |       |       |       |         |
 
 **Real output from one trial**, pasted as text, naming the file and function
 that produced it:
@@ -384,8 +370,6 @@ that produced it:
 
      Look for a pattern. Five failures on one signal is one problem, not five. -->
 
-
-
 ---
 
 ## The Improvement
@@ -398,14 +382,10 @@ that produced it:
 
 <!-- Same format. `run_attacks.py --label after` -->
 
-
-
 **Did it help, and how do I know:**
 
 <!-- Widening the unsure band usually fixes one problem and creates another.
      Reporting that trade honestly is worth full credit. -->
-
-
 
 ---
 
@@ -414,14 +394,10 @@ that produced it:
 <!-- For each attack still getting through and each criterion still missed:
      what you'd do, and why you stopped. -->
 
-
-
 **The trade I'd make if this ran for real:**
 
 <!-- Two sentences. Fewer wrong accusations means more AI text getting through.
      Say which way you'd go and WHO PAYS FOR IT. -->
-
-
 
 <!-- ═════════════════════════════════════════════════════════════════════
 
