@@ -116,24 +116,65 @@ def main():
             for i, body in enumerate(bodies_for(scenario), 1):
                 preview = describe(body)
                 try:
-                    response = requests.post(f"{args.url}/submit", json=body,
-                                             timeout=args.timeout)
-                    payload = response.json() if response.content else {}
-                    results.append({
-                        "status": response.status_code,
-                        "guess": payload.get("guess"),
-                        "confidence": payload.get("confidence"),
-                        "model_score": payload.get("model_score"),
-                        "style_score": payload.get("style_score"),
-                        "label": payload.get("label"),
-                        "sent": preview,
-                    })
+                    if scenario.get("is_appeal"):
+                        if body.get("fake_id"):
+                            appeal_resp = requests.post(
+                                f"{args.url}/appeal",
+                                json={
+                                    "content_id": "00000000-0000-0000-0000-000000000000",
+                                    "reasoning": body.get("reasoning", "Unknown ID"),
+                                },
+                                timeout=args.timeout,
+                            )
+                            payload = appeal_resp.json() if appeal_resp.content else {}
+                            results.append({
+                                "status": appeal_resp.status_code,
+                                "guess": payload.get("error", "not_found"),
+                                "appeal_status": payload.get("status") or payload.get("error"),
+                                "message": payload.get("message"),
+                                "sent": "POST /appeal (nonexistent content_id)",
+                            })
+                        else:
+                            sub_resp = requests.post(
+                                f"{args.url}/submit",
+                                json={"text": body.get("text"), "creator_id": f"eval_appeal_{i}"},
+                                timeout=args.timeout,
+                            )
+                            cid = sub_resp.json().get("content_id")
+                            appeal_resp = requests.post(
+                                f"{args.url}/appeal",
+                                json={"content_id": cid, "reasoning": body.get("reasoning")},
+                                timeout=args.timeout,
+                            )
+                            payload = appeal_resp.json() if appeal_resp.content else {}
+                            results.append({
+                                "status": appeal_resp.status_code,
+                                "content_id": cid,
+                                "guess": payload.get("status", "under_review"),
+                                "appeal_status": payload.get("status"),
+                                "message": payload.get("message"),
+                                "reasoning": payload.get("reasoning"),
+                                "sent": f"POST /appeal ({cid[:8]}...)",
+                            })
+                    else:
+                        response = requests.post(f"{args.url}/submit", json=body,
+                                                 timeout=args.timeout)
+                        payload = response.json() if response.content else {}
+                        results.append({
+                            "status": response.status_code,
+                            "guess": payload.get("guess"),
+                            "confidence": payload.get("confidence"),
+                            "model_score": payload.get("model_score"),
+                            "style_score": payload.get("style_score"),
+                            "label": payload.get("label"),
+                            "sent": preview,
+                        })
                 except Exception as exc:  # noqa: BLE001
                     results.append({"status": None, "error": f"{type(exc).__name__}: {exc}",
                                     "sent": preview})
 
             trials.append(results)
-            guesses = [r.get("guess") or "—" for r in results]
+            guesses = [r.get("guess") or str(r.get("status") or "—") for r in results]
             print(f"  trial {trial}: {', '.join(guesses)}")
 
         rows.append({"scenario": scenario, "trials": trials})
