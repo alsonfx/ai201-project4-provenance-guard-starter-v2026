@@ -304,22 +304,20 @@ $ curl "http://127.0.0.1:5000/log?limit=3"
 
 ## Rate Limiting
 
-**My limits:** ___ per minute, ___ per day
+**My limits:** 10 per minute, 200 per day
 
 **Why those numbers and not others:**
-
-<!-- Think about two people: a real writer submitting their own work a few
-     times an hour, and a script sending a thousand variations to map your
-     thresholds. Your numbers have to be liveable for the first and hostile to
-     the second. -->
+A genuine writer works iteratively, drafting and revising text at a natural pace of a few submissions an hour. Even in active burst editing or classroom review sessions, a writer will not submit more than 10 drafts in a single minute or 200 in a single day. Conversely, an adversary trying to map detector thresholds or brute-force evasions relies on high-throughput automated scripting across hundreds or thousands of prompt variations. A 10/minute rate limit makes high-volume reconnaissance prohibitively slow (mapping 1,000 variations would take over an hour and a half) and quickly trips the 200/day limit, neutralizing automated threshold exploration while remaining completely transparent to human users.
 
 **What a caller counts as:** 
+A caller counts as their `creator_id` provided in the JSON body (`payload.get("creator_id")`). If `creator_id` is omitted, blank, or the payload is not a valid JSON object, the limiter safely falls back to the caller's remote IP address (`flask_limiter.util.get_remote_address`).
 
 **The run of status codes when I pushed past it:**
 
 <!-- python run_attacks.py --flood 15 -->
 
 ```
+200 200 200 200 200 200 200 200 200 200 429 429 429 429 429
 ```
 
 ---
@@ -423,9 +421,9 @@ that produced it:
 
      SUBMISSION CHECKLIST — unit 8
 
-       [ ] Rate limiting on /submit, with your numbers justified
-       [ ] The pasted run of status codes showing 429
-       [ ] Audit log with all nine fields, recording rejections too
+       [x] Rate limiting on /submit, with your numbers justified
+       [x] The pasted run of status codes showing 429
+       [x] Audit log with all nine fields, recording rejections too
        [ ] The attack set run IN FULL, every input with an outcome
        [ ] Ten audit log entries pasted as text
        [ ] Five criteria across three trials
