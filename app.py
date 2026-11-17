@@ -27,12 +27,23 @@ Routes:
 import time
 import uuid
 
-from flask import Flask, jsonify, request
+from flask import Flask, g, jsonify, request
 
 import audit
 import config
 
 app = Flask(__name__)
+
+
+@app.before_request
+def _record_request_start():
+    g.start_time = time.perf_counter()
+
+
+def _elapsed_ms(start_time: float | None = None) -> float:
+    """Return elapsed wall-clock milliseconds with 4-decimal microsecond precision."""
+    t0 = start_time if start_time is not None else getattr(g, "start_time", time.perf_counter())
+    return max(round((time.perf_counter() - t0) * 1000, 4), 0.0001)
 
 
 # ── Rate limiting — UNIT 8 ────────────────────────────────────────────────────
@@ -202,21 +213,25 @@ def submit():
     what should this do when `text` is missing, empty, or enormous? A crash on
     a malformed input is one of the most common real failures there is.
     """
-    body, status_code = _evaluate_submission(request.get_json(silent=True))
+    body, status_code = _evaluate_submission(request.get_json(silent=True), start_time=None)
     return jsonify(body), status_code
 
 
-def _evaluate_submission(payload, batch_id: str | None = None) -> tuple[dict, int]:
+def _evaluate_submission(
+    payload,
+    batch_id: str | None = None,
+    start_time: float | None = None,
+) -> tuple[dict, int]:
     """Validate, score, and audit-log one submission payload."""
     import detector
     import scoring
     import stylometry
 
-    t0 = time.perf_counter()
+    t0 = start_time
     extra_ctx = {"batch_id": batch_id} if batch_id else {}
 
     if not isinstance(payload, dict):
-        duration_ms = round((time.perf_counter() - t0) * 1000, 2)
+        duration_ms = _elapsed_ms(t0)
         audit.log_rejection(
             creator_id="unknown",
             reason="invalid_json",
@@ -238,7 +253,7 @@ def _evaluate_submission(payload, batch_id: str | None = None) -> tuple[dict, in
 
     raw_text = payload.get("text")
     if not isinstance(raw_text, str) or not raw_text.strip():
-        duration_ms = round((time.perf_counter() - t0) * 1000, 2)
+        duration_ms = _elapsed_ms(t0)
         audit.log_rejection(
             creator_id=creator_id,
             reason="missing_or_empty_text",
@@ -253,7 +268,7 @@ def _evaluate_submission(payload, batch_id: str | None = None) -> tuple[dict, in
 
     clean_text = raw_text.strip()
     if len(clean_text) > 20000:
-        duration_ms = round((time.perf_counter() - t0) * 1000, 2)
+        duration_ms = _elapsed_ms(t0)
         audit.log_rejection(
             creator_id=creator_id,
             reason="text_too_long",
@@ -270,7 +285,7 @@ def _evaluate_submission(payload, batch_id: str | None = None) -> tuple[dict, in
     try:
         m_score = detector.model_signal(clean_text)
     except ValueError as exc:
-        duration_ms = round((time.perf_counter() - t0) * 1000, 2)
+        duration_ms = _elapsed_ms(t0)
         audit.log_rejection(
             creator_id=creator_id,
             reason="text_too_short",
@@ -288,7 +303,7 @@ def _evaluate_submission(payload, batch_id: str | None = None) -> tuple[dict, in
     confidence = scoring.combine_signals(m_score, s_score)
     guess, label = scoring.score_to_label(confidence)
     content_id = str(uuid.uuid4())
-    duration_ms = round((time.perf_counter() - t0) * 1000, 2)
+    duration_ms = _elapsed_ms(t0)
 
     audit.log_decision(
         content_id=content_id,
@@ -325,11 +340,10 @@ def batch_submit():
     Expects JSON:
         {"items": [{"text": "...", "creator_id": "..."}, ...], "creator_id": "..."}
     """
-    t0 = time.perf_counter()
     payload = request.get_json(silent=True)
 
     if not isinstance(payload, dict):
-        duration_ms = round((time.perf_counter() - t0) * 1000, 2)
+        duration_ms = _elapsed_ms()
         audit.log_rejection(
             creator_id="unknown",
             reason="invalid_batch_json",
@@ -350,7 +364,7 @@ def batch_submit():
 
     items = payload.get("items")
     if not isinstance(items, list) or len(items) == 0:
-        duration_ms = round((time.perf_counter() - t0) * 1000, 2)
+        duration_ms = _elapsed_ms()
         audit.log_rejection(
             creator_id=batch_creator,
             reason="missing_or_empty_batch_items",
@@ -363,7 +377,7 @@ def batch_submit():
         }), 400
 
     if len(items) > config.BATCH_MAX_ITEMS:
-        duration_ms = round((time.perf_counter() - t0) * 1000, 2)
+        duration_ms = _elapsed_ms()
         audit.log_rejection(
             creator_id=batch_creator,
             reason="batch_too_large",
@@ -384,7 +398,8 @@ def batch_submit():
     rejected = 0
 
     for idx, item in enumerate(items):
-        item_body, item_status = _evaluate_submission(item, batch_id=batch_id)
+        item_t0 = time.perf_counter()
+        item_body, item_status = _evaluate_submission(item, batch_id=batch_id, start_time=item_t0)
         item_entry = {"index": idx, "status": item_status, **item_body}
         results.append(item_entry)
         if item_status == 200:
@@ -393,7 +408,7 @@ def batch_submit():
         else:
             rejected += 1
 
-    duration_ms = round((time.perf_counter() - t0) * 1000, 2)
+    duration_ms = _elapsed_ms()
     audit.log_batch(
         batch_id=batch_id,
         creator_id=batch_creator,
