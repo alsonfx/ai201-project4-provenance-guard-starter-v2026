@@ -103,6 +103,10 @@ RATE_LIMIT_PER_DAY = 200
 RATE_LIMIT_STORAGE = "memory://"
 
 
+# ─── Batch endpoint (Capstone — Shape C) ────────────────────────────────────
+BATCH_MAX_ITEMS = 10
+
+
 # ─── Paths ───────────────────────────────────────────────────────────────────
 
 LOG_DIR = ROOT / "logs"

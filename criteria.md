@@ -117,3 +117,50 @@ When a human writer is caught by the false-positive blind spot traced in Milesto
      A number you missed stays where it is, gets diagnosed, and gets a fix
      attempted. That's where the points are.
      ───────────────────────────────────────────────────────────────────────── -->
+
+---
+
+# Capstone Criteria (Unit 9 — Shape C: `POST /batch` & Instrumentation)
+
+## 1. Batch decision parity with single-submission `/submit` (Extension)
+
+Across a batch of 5 diverse texts (spanning human, unsure, and AI score ranges) sent to `POST /batch`, **5 out of 5 (`100%`)** produce the exact same `guess` and `confidence` (within `0.0001`) as submitting the same 5 texts individually to `POST /submit`, in every trial across all 3 trials.
+
+**Why this target:**
+`POST /batch` is an operational wrapper around the provenance pipeline, not a separate detector. If batching silently alters whitespace stripping, token truncation, or signal weighting, the same writer's text would receive different verdicts depending on which endpoint a client called. Requiring `5/5` parity enforces strict consistency between both routes.
+
+---
+
+## 2. Partial-failure isolation in mixed batches (Extension — Bad Path)
+
+Across 3 mixed-batch requests to `POST /batch`, each containing 2 valid texts and 2 malformed items (empty `"text": ""` and missing `"text"` field), **3 out of 3 (`100%`)** return HTTP `200` (with `0` HTTP `500` crashes), report `"succeeded": 2` and `"rejected": 2`, and return valid `content_id` values for the 2 valid items in every trial across all 3 trials.
+
+**Why this target:**
+A naive batch loop aborts the entire request with a `400` or crashes with a `500` as soon as one item fails validation, discarding legitimate submissions in the same batch. Requiring `3/3` partial-failure isolation ensures malformed items are quarantined per index without penalizing valid items.
+
+---
+
+## 3. Batch size bound and malformed batch rejection (Extension — Bad Path)
+
+Across 4 invalid `POST /batch` request bodies—(1) empty `"items": []`, (2) oversized 11-item batch (`> BATCH_MAX_ITEMS = 10`), (3) missing `"items"` key, and (4) non-list `"items": "hello"`—**4 out of 4 (`100%`)** return HTTP `400 Bad Request` (with `0` HTTP `500` crashes) and append a `"status": "rejected"` record to `logs/audit.jsonl` in every trial across all 3 trials.
+
+**Why this target:**
+Because `gpt2` runs synchronously on CPU, an unbounded batch of hundreds of items would monopolize the Flask worker and cause request timeouts. Enforcing `4/4` rejection at the route boundary protects service availability while keeping rejected batch probes visible in the audit trail.
+
+---
+
+## 4. End-to-end structured instrumentation completeness (Extension — Observability)
+
+Across 5 `POST /submit` requests and 2 `POST /batch` requests (including both valid and rejected calls), **100% of the resulting entries** appended to `logs/audit.jsonl` contain a valid ISO-8601 `timestamp`, `status`, and a numeric `duration_ms > 0`, and every completed batch writes a `batch_summary` record where `total_items == succeeded + rejected`, across all 3 trials.
+
+**Why this target:**
+Observability breaks down if error branches return early without logging or omit latency measurements. Requiring `100%` structured field completeness guarantees that we can measure compute cost, latency, and rejection rates from `logs/audit.jsonl` after the fact without modifying code.
+
+---
+
+## 5. Warm batch latency ceiling (Performance / Cost)
+
+After `gpt2` is warm in memory, at least **4 out of 5 (`>= 80%`)** 3-item `POST /batch` requests (each item ~40–70 words) complete with `duration_ms < 3000` (`< 3.0s`) across all 3 trials.
+
+**Why this target:**
+On local CPU, one ~60-word `gpt2` forward pass takes a few hundred milliseconds, so 3 sequential items should finish well under `3000 ms`. Allowing 1 of 5 (`>= 80%`) tolerates occasional local OS/Python garbage-collection jitter while still catching severe regressions such as accidentally reloading the model per batch item (`> 10,000 ms`).

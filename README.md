@@ -938,3 +938,39 @@ If this service were deployed in production, I would prioritize protecting human
 ---
 
 📖 **How to run this project: [RUNNING.md](RUNNING.md)**
+
+---
+
+## Capstone
+
+**What This Extends**
+This extends **Provenance Guard** (Project 4) by adding a synchronous **`POST /batch`** endpoint for multi-text provenance evaluation with per-item error isolation, aggregate classification counts, and end-to-end latency (`duration_ms`) structured logging across both `/submit` and `/batch`.
+
+**The Shape**
+**Shape C — Extend one capability.** I am adding one bounded capability: `POST /batch`, which accepts up to `10` text items (`config.BATCH_MAX_ITEMS`), validates and scores each item through the shared `_evaluate_submission` pipeline so malformed items fail per-index without aborting valid ones, and returns per-item verdicts alongside aggregate counts and total `duration_ms`.
+
+*What is out of scope:*
+1. Modifying `detector.py` or `stylometry.py` scoring formulas, or swapping/retraining the local `gpt2` model.
+2. Adding an asynchronous job queue, persistent SQL database, or frontend web UI.
+3. Cloud hosting (Path A), because loading `gpt2` + PyTorch locally exceeds the 512 MB free-tier memory limit.
+
+**Running It**
+**Path B — local with logs.** See the **Capstone Run Path (Path B — Local with Logs)** section in [RUNNING.md](RUNNING.md) for the exact Python version (`3.13.9`), pinned `requirements.txt` dependencies, local `gpt2` model (~550 MB), and single start command (`python app.py`).
+
+**Instrumentation**
+*(To be populated after `criteria.md` is committed and the instrumented session runs.)*
+
+**What It Costs**
+*(To be populated from the 10-run measurement after `criteria.md` is committed.)*
+
+**Run Log and Verdicts**
+*(To be populated after running the 5 Capstone criteria across 3 trials.)*
+
+**The Improvement**
+*(To be populated after diagnosing the initial Capstone run and re-running.)*
+
+**What's Still Broken**
+*(To be populated after the second Capstone run.)*
+
+**How I Used AI**
+*(To be populated with two specific Capstone moments.)*

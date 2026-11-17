@@ -112,6 +112,32 @@ def log_rejection(creator_id: str, reason: str, **extra) -> dict:
     })
 
 
+def log_batch(
+    batch_id: str,
+    creator_id: str,
+    total_items: int,
+    succeeded: int,
+    rejected: int,
+    counts: dict,
+    duration_ms: float,
+    **extra,
+) -> dict:
+    """Record a completed POST /batch summary with counts and latency."""
+    return _append({
+        "timestamp": _now(),
+        "batch_id": batch_id,
+        "creator_id": creator_id,
+        "event": "batch_summary",
+        "status": "completed",
+        "total_items": total_items,
+        "succeeded": succeeded,
+        "rejected": rejected,
+        "counts": counts,
+        "duration_ms": duration_ms,
+        **extra,
+    })
+
+
 def _append(entry: dict) -> dict:
     config.LOG_DIR.mkdir(parents=True, exist_ok=True)
     line = json.dumps(entry, ensure_ascii=False)

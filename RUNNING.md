@@ -306,3 +306,31 @@ is evidence, and the entries you paste into your README are what unit 8 grades.
 
 **Do not delete and recreate this repository.** You submit the same URL both
 units.
+
+---
+
+## Capstone Run Path (Path B — Local with Logs)
+
+This extension runs locally via **Path B** because loading `gpt2` and `torch` in memory exceeds the 512 MB free cloud-hosting memory tier.
+
+### Environment Requirements
+- **Python:** 3.11, 3.12, or 3.13 (tested on **Python 3.13.9** on Windows; 3.14 is not supported)
+- **Pinned dependencies (`requirements.txt`):** `flask>=3.0,<4.0`, `flask-limiter>=3.5,<4.0`, `requests>=2.31,<3.0`, `transformers>=4.44,<5.0`, `torch>=2.2,<3.0`, `gunicorn>=21.2,<24.0`, `certifi>=2026.10.19`
+- **Model artifact:** Local `gpt2` causal language model (~550 MB, downloaded once to the Hugging Face cache via `python detector.py`)
+
+### Clean-Checkout Setup & Single Start Command
+```bash
+python -m venv .venv
+# Windows PowerShell: .\.venv\Scripts\Activate.ps1
+# macOS / Linux:      source .venv/bin/activate
+pip install -r requirements.txt
+python test.py
+python app.py
+```
+
+### Verify the Extension (`POST /batch`)
+In a second terminal (PowerShell uses `curl.exe` on one line):
+```powershell
+curl.exe -X POST http://127.0.0.1:5000/batch -H "Content-Type: application/json" -d '{\"creator_id\": \"smoke_test\", \"items\": [{\"text\": \"I spent three hours tuning my acoustic guitar after replacing all six strings.\", \"creator_id\": \"smoke_1\"}, {\"text\": \"\", \"creator_id\": \"smoke_bad\"}]}'
+```
+Structured logs (including `timestamp`, `duration_ms`, `status`, and `batch_summary` records) are written to `logs/audit.jsonl` and readable via `GET /log`.

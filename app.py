@@ -24,6 +24,7 @@ Routes:
     GET  /health      is the service up, and is the model loaded
 """
 
+import time
 import uuid
 
 from flask import Flask, jsonify, request
@@ -201,17 +202,32 @@ def submit():
     what should this do when `text` is missing, empty, or enormous? A crash on
     a malformed input is one of the most common real failures there is.
     """
+    body, status_code = _evaluate_submission(request.get_json(silent=True))
+    return jsonify(body), status_code
+
+
+def _evaluate_submission(payload, batch_id: str | None = None) -> tuple[dict, int]:
+    """Validate, score, and audit-log one submission payload."""
     import detector
     import scoring
     import stylometry
 
-    payload = request.get_json(silent=True)
+    t0 = time.perf_counter()
+    extra_ctx = {"batch_id": batch_id} if batch_id else {}
+
     if not isinstance(payload, dict):
-        audit.log_rejection(creator_id="unknown", reason="invalid_json")
-        return jsonify({
+        duration_ms = round((time.perf_counter() - t0) * 1000, 2)
+        audit.log_rejection(
+            creator_id="unknown",
+            reason="invalid_json",
+            duration_ms=duration_ms,
+            **extra_ctx,
+        )
+        return {
             "error": "invalid_input",
             "message": "Request body must be a JSON object.",
-        }), 400
+            "duration_ms": duration_ms,
+        }, 400
 
     raw_creator = payload.get("creator_id")
     creator_id = (
@@ -222,37 +238,57 @@ def submit():
 
     raw_text = payload.get("text")
     if not isinstance(raw_text, str) or not raw_text.strip():
-        audit.log_rejection(creator_id=creator_id, reason="missing_or_empty_text")
-        return jsonify({
+        duration_ms = round((time.perf_counter() - t0) * 1000, 2)
+        audit.log_rejection(
+            creator_id=creator_id,
+            reason="missing_or_empty_text",
+            duration_ms=duration_ms,
+            **extra_ctx,
+        )
+        return {
             "error": "invalid_input",
             "message": "Field 'text' is required and must be a non-empty string.",
-        }), 400
+            "duration_ms": duration_ms,
+        }, 400
 
     clean_text = raw_text.strip()
     if len(clean_text) > 20000:
+        duration_ms = round((time.perf_counter() - t0) * 1000, 2)
         audit.log_rejection(
             creator_id=creator_id,
             reason="text_too_long",
             text_length=len(clean_text),
+            duration_ms=duration_ms,
+            **extra_ctx,
         )
-        return jsonify({
+        return {
             "error": "invalid_input",
             "message": "Field 'text' exceeds maximum length of 20,000 characters.",
-        }), 400
+            "duration_ms": duration_ms,
+        }, 400
 
     try:
         m_score = detector.model_signal(clean_text)
     except ValueError as exc:
-        audit.log_rejection(creator_id=creator_id, reason="text_too_short")
-        return jsonify({
+        duration_ms = round((time.perf_counter() - t0) * 1000, 2)
+        audit.log_rejection(
+            creator_id=creator_id,
+            reason="text_too_short",
+            text_length=len(clean_text),
+            duration_ms=duration_ms,
+            **extra_ctx,
+        )
+        return {
             "error": "invalid_input",
             "message": str(exc),
-        }), 400
+            "duration_ms": duration_ms,
+        }, 400
 
     s_score = stylometry.style_signal(clean_text)
     confidence = scoring.combine_signals(m_score, s_score)
     guess, label = scoring.score_to_label(confidence)
     content_id = str(uuid.uuid4())
+    duration_ms = round((time.perf_counter() - t0) * 1000, 2)
 
     audit.log_decision(
         content_id=content_id,
@@ -263,9 +299,12 @@ def submit():
         combined_score=confidence,
         label=label,
         status="decided",
+        text_length=len(clean_text),
+        duration_ms=duration_ms,
+        **extra_ctx,
     )
 
-    return jsonify({
+    return {
         "content_id": content_id,
         "guess": guess,
         "confidence": confidence,
@@ -273,7 +312,107 @@ def submit():
         "model_score": m_score,
         "style_score": s_score,
         "status": "decided",
-    })
+        "duration_ms": duration_ms,
+    }, 200
+
+
+@app.post("/batch")
+@limiter.limit(f"{config.RATE_LIMIT_PER_MINUTE}/minute;{config.RATE_LIMIT_PER_DAY}/day")
+def batch_submit():
+    """
+    Evaluate a bounded batch of submissions in one request (Capstone — Shape C).
+
+    Expects JSON:
+        {"items": [{"text": "...", "creator_id": "..."}, ...], "creator_id": "..."}
+    """
+    t0 = time.perf_counter()
+    payload = request.get_json(silent=True)
+
+    if not isinstance(payload, dict):
+        duration_ms = round((time.perf_counter() - t0) * 1000, 2)
+        audit.log_rejection(
+            creator_id="unknown",
+            reason="invalid_batch_json",
+            duration_ms=duration_ms,
+        )
+        return jsonify({
+            "error": "invalid_input",
+            "message": "Request body must be a JSON object.",
+            "duration_ms": duration_ms,
+        }), 400
+
+    raw_creator = payload.get("creator_id")
+    batch_creator = (
+        raw_creator.strip()
+        if isinstance(raw_creator, str) and raw_creator.strip()
+        else "anonymous"
+    )
+
+    items = payload.get("items")
+    if not isinstance(items, list) or len(items) == 0:
+        duration_ms = round((time.perf_counter() - t0) * 1000, 2)
+        audit.log_rejection(
+            creator_id=batch_creator,
+            reason="missing_or_empty_batch_items",
+            duration_ms=duration_ms,
+        )
+        return jsonify({
+            "error": "invalid_input",
+            "message": "Field 'items' is required and must be a non-empty list.",
+            "duration_ms": duration_ms,
+        }), 400
+
+    if len(items) > config.BATCH_MAX_ITEMS:
+        duration_ms = round((time.perf_counter() - t0) * 1000, 2)
+        audit.log_rejection(
+            creator_id=batch_creator,
+            reason="batch_too_large",
+            batch_size=len(items),
+            max_items=config.BATCH_MAX_ITEMS,
+            duration_ms=duration_ms,
+        )
+        return jsonify({
+            "error": "invalid_input",
+            "message": f"Batch size {len(items)} exceeds maximum of {config.BATCH_MAX_ITEMS} items.",
+            "duration_ms": duration_ms,
+        }), 400
+
+    batch_id = str(uuid.uuid4())
+    results = []
+    counts = {"human": 0, "unsure": 0, "ai": 0}
+    succeeded = 0
+    rejected = 0
+
+    for idx, item in enumerate(items):
+        item_body, item_status = _evaluate_submission(item, batch_id=batch_id)
+        item_entry = {"index": idx, "status": item_status, **item_body}
+        results.append(item_entry)
+        if item_status == 200:
+            succeeded += 1
+            counts[item_body["guess"]] += 1
+        else:
+            rejected += 1
+
+    duration_ms = round((time.perf_counter() - t0) * 1000, 2)
+    audit.log_batch(
+        batch_id=batch_id,
+        creator_id=batch_creator,
+        total_items=len(items),
+        succeeded=succeeded,
+        rejected=rejected,
+        counts=counts,
+        duration_ms=duration_ms,
+    )
+
+    return jsonify({
+        "batch_id": batch_id,
+        "total": len(items),
+        "succeeded": succeeded,
+        "rejected": rejected,
+        "counts": counts,
+        "duration_ms": duration_ms,
+        "results": results,
+    }), 200
 
 
 @app.post("/appeal")
