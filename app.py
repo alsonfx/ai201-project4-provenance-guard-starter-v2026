@@ -19,6 +19,7 @@ Routes:
 
     POST /ping        the worked example. Already works. Don't edit it
     POST /submit      ← YOU BUILD THIS (Milestone 3, 4, 5)
+    POST /batch       evaluate a bounded batch of submissions (Capstone)
     POST /appeal      ← YOU BUILD THIS (Milestone 5)
     GET  /log         the audit log. Already works
     GET  /health      is the service up, and is the model loaded
@@ -44,6 +45,12 @@ def _elapsed_ms(start_time: float | None = None) -> float:
     """Return elapsed wall-clock milliseconds with 4-decimal microsecond precision."""
     t0 = start_time if start_time is not None else getattr(g, "start_time", time.perf_counter())
     return max(round((time.perf_counter() - t0) * 1000, 4), 0.0001)
+
+
+def _normalize_creator_id(payload: dict, default: str = "anonymous") -> str:
+    """Extract a clean non-empty creator_id string from a JSON object."""
+    raw = payload.get("creator_id")
+    return raw.strip() if isinstance(raw, str) and raw.strip() else default
 
 
 # ── Rate limiting — UNIT 8 ────────────────────────────────────────────────────
@@ -116,9 +123,10 @@ if config.RATE_LIMITING_ENABLED:
         if not isinstance(payload, dict):
             payload = {}
         audit.log_rejection(
-            creator_id=payload.get("creator_id", "unknown"),
+            creator_id=_normalize_creator_id(payload, default="unknown"),
             reason="rate_limited",
             limit=str(exc.description),
+            duration_ms=_elapsed_ms(),
         )
         return jsonify({
             "error": "rate_limited",
@@ -244,12 +252,7 @@ def _evaluate_submission(
             "duration_ms": duration_ms,
         }, 400
 
-    raw_creator = payload.get("creator_id")
-    creator_id = (
-        raw_creator.strip()
-        if isinstance(raw_creator, str) and raw_creator.strip()
-        else "anonymous"
-    )
+    creator_id = _normalize_creator_id(payload)
 
     raw_text = payload.get("text")
     if not isinstance(raw_text, str) or not raw_text.strip():
@@ -355,12 +358,7 @@ def batch_submit():
             "duration_ms": duration_ms,
         }), 400
 
-    raw_creator = payload.get("creator_id")
-    batch_creator = (
-        raw_creator.strip()
-        if isinstance(raw_creator, str) and raw_creator.strip()
-        else "anonymous"
-    )
+    batch_creator = _normalize_creator_id(payload)
 
     items = payload.get("items")
     if not isinstance(items, list) or len(items) == 0:
