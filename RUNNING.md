@@ -320,6 +320,13 @@ This extension runs locally via **Path B** because loading `gpt2` and `torch` in
 
 ### Clean-Checkout Setup & Single Start Command
 ```bash
+# With uv (recommended):
+uv venv .venv --python 3.13
+uv pip install -r requirements.txt
+uv run python test.py
+uv run python app.py
+
+# Or with standard venv/pip:
 python -m venv .venv
 # Windows PowerShell: .\.venv\Scripts\Activate.ps1
 # macOS / Linux:      source .venv/bin/activate
